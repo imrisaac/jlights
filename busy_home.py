@@ -220,7 +220,6 @@ def get_bridge(driver):
     bridge.add_accessory(FakeFan(driver, 'Big Fan'))
     bridge.add_accessory(GarageDoor(driver, 'Garage'))
     bridge.add_accessory(TemperatureSensor(driver, 'Sensor'))
-    bridge.add_accessory(get_accessory(driver))
 
     return bridge
 

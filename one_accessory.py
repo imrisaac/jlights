@@ -10,86 +10,10 @@ import neopixel
 
 from pyhap.accessory import Accessory, Bridge
 from pyhap.accessory_driver import AccessoryDriver
-from pyhap.const import (CATEGORY_FAN,
-                         CATEGORY_LIGHTBULB,
-                         CATEGORY_GARAGE_DOOR_OPENER,
-                         CATEGORY_SENSOR)
+from pyhap.const import (CATEGORY_LIGHTBULB)
 
 
 logging.basicConfig(level=logging.INFO, format="[%(module)s] %(message)s")
-
-
-class TemperatureSensor(Accessory):
-    """Fake Temperature sensor, measuring every 3 seconds."""
-
-    category = CATEGORY_SENSOR
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        serv_temp = self.add_preload_service('TemperatureSensor')
-        self.char_temp = serv_temp.configure_char('CurrentTemperature')
-
-    @Accessory.run_at_interval(3)
-    async def run(self):
-        self.char_temp.set_value(random.randint(18, 26))
-
-
-class FakeFan(Accessory):
-    """Fake Fan, only logs whatever the client set."""
-
-    category = CATEGORY_FAN
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # Add the fan service. Also add optional characteristics to it.
-        serv_fan = self.add_preload_service(
-            'Fan', chars=['RotationSpeed', 'RotationDirection'])
-
-        self.char_rotation_speed = serv_fan.configure_char(
-            'RotationSpeed', setter_callback=self.set_rotation_speed)
-        self.char_rotation_direction = serv_fan.configure_char(
-            'RotationDirection', setter_callback=self.set_rotation_direction)
-
-    def set_rotation_speed(self, value):
-        logging.debug("Rotation speed changed: %s", value)
-
-    def set_rotation_direction(self, value):
-        logging.debug("Rotation direction changed: %s", value)
-
-class LightBulb(Accessory):
-    """Fake lightbulb, logs what the client sets."""
-
-    category = CATEGORY_LIGHTBULB
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        serv_light = self.add_preload_service('Lightbulb')
-        self.char_on = serv_light.configure_char(
-            'On', setter_callback=self.set_bulb)
-
-    def set_bulb(self, value):
-        logging.info("Bulb value: %s", value)
-
-class GarageDoor(Accessory):
-    """Fake garage door."""
-
-    category = CATEGORY_GARAGE_DOOR_OPENER
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.add_preload_service('GarageDoorOpener')\
-            .configure_char(
-                'TargetDoorState', setter_callback=self.change_state)
-
-    def change_state(self, value):
-        logging.info("Bulb value: %s", value)
-        self.get_service('GarageDoorOpener')\
-            .get_characteristic('CurrentDoorState')\
-            .set_value(value)
 
 class NeoPixelLightStrip(Accessory):
 
@@ -112,6 +36,13 @@ class NeoPixelLightStrip(Accessory):
         """
 
         super().__init__(*args, **kwargs)
+
+        self.set_info_service(
+          manufacturer='Isaac',
+          model='1000',
+          firmware_revision='0.0',
+          serial_number='1'
+        )
 
         # Set our neopixel API services up using Lightbulb base
         serv_light = self.add_preload_service(
@@ -136,25 +67,26 @@ class NeoPixelLightStrip(Accessory):
         self.is_GRB = is_GRB  # Most neopixels are Green Red Blue
         self.LED_count = LED_count
 
-        self.neo_strip = neopixel.NeoPixel(board.D18, 2, brightness=0.2, auto_write=False, pixel_order=neopixel.GRBW)
+        self.neo_strip = neopixel.NeoPixel(board.D18, 4, brightness=1, auto_write=False, pixel_order=neopixel.RGBW)
 
     def set_state(self, value):
         self.accessory_state = value
         if value == 1:  # On
             self.set_hue(self.hue)
         else:
-            self.update_neopixel_with_color(0, 0, 0)  # Off
+            self.update_neopixel_with_color(0, 0, 0, 0)  # On
 
     def set_hue(self, value):
         # Lets only write the new RGB values if the power is on
         # otherwise update the hue value only
         if self.accessory_state == 1:
             self.hue = value
-            rgb_tuple = self.hsv_to_rgb(
+            rgb_tuple = self.hsv_to_rgbw(
                 self.hue, self.saturation, self.brightness)
-            if len(rgb_tuple) == 3:
+            if len(rgb_tuple) == 4:
                 self.update_neopixel_with_color(
-                    rgb_tuple[0], rgb_tuple[1], rgb_tuple[2])
+                    rgb_tuple[0], rgb_tuple[1], rgb_tuple[2], rgb_tuple[3])
+                print("r:", rgb_tuple[0], "g:", rgb_tuple[1], "b:", rgb_tuple[2], "w:", rgb_tuple[3])
         else:
             self.hue = value
 
@@ -166,17 +98,40 @@ class NeoPixelLightStrip(Accessory):
         self.saturation = value
         self.set_hue(self.hue)
 
-    def update_neopixel_with_color(self, red, green, blue):
-        self.neo_strip.fill((green, red, blue, 0))
+    def update_neopixel_with_color(self, red, green, blue, white = 0):
+        self.neo_strip.fill((green, red, blue, white))
         self.neo_strip.show()
 
-    def hsv_to_rgb(self, h, s, v):
+    def hsv_to_rgbw(self, h, s, v):
         """
         This function takes
          h - 0 - 360 Deg
          s - 0 - 100 %
          v - 0 - 100 %
+
+         h   s   v
+
+        030 076 100
+
+300 002 100     300 002 100
+
+        222 020 100
+
+        siri warm white, 100w tungston: h 31 s 33 v 100
+        siri cool white, cool florescent:h 208 s 17 v 100
+        siri white: h 0 s 0 v 100
+
         """
+        print("h", h, "s", s, "v", v)
+
+        if s < 40 and h > 200:
+          #cool white request
+          w = (v / 100) * 255
+        elif h < 31 and s < 80:
+          # warm white request
+          w = (v / 100) * 255
+        else:
+          w = 0
 
         hPri = h / 60
         s = s / 100
@@ -206,23 +161,12 @@ class NeoPixelLightStrip(Accessory):
             RGB_Pri = [0, 0, 0]
 
         m = v - C
-
-        return int((RGB_Pri[0] + m) * 255), int((RGB_Pri[1] + m) * 255), int((RGB_Pri[2] + m) * 255)
+        
+        return int((RGB_Pri[0] + m) * 255), int((RGB_Pri[1] + m) * 255), int((RGB_Pri[2] + m) * 255), int(w)
 
 def get_accessory(driver):
     """Call this method to get a standalone Accessory."""
     return NeoPixelLightStrip(2, True, 18, 800000, 10, 255, False, driver, 'NeoPixel')
-
-def get_bridge(driver):
-    bridge = Bridge(driver, 'Bridge')
-
-    bridge.add_accessory(LightBulb(driver, 'Lightbulb'))
-    bridge.add_accessory(FakeFan(driver, 'Big Fan'))
-    bridge.add_accessory(GarageDoor(driver, 'Garage'))
-    bridge.add_accessory(TemperatureSensor(driver, 'Sensor'))
-    bridge.add_accessory(get_accessory(driver))
-
-    return bridge
 
 driver = AccessoryDriver(port=51826, persist_file='one_accessory.state')
 driver.add_accessory(get_accessory(driver))
